@@ -148,10 +148,14 @@ class detr_loss(nn.Module):
         src_boxes = src_boxes.to("cpu")
         loss_bbox = nn.functional.l1_loss(src_boxes, target_boxes, reduction='none')
         losses = {}
+        temp = generalized_box_iou(src_boxes, target_boxes)
         losses['loss_bbox'] = loss_bbox.sum() / num_boxes
-        loss_giou = 1 - torch.diag(generalized_box_iou(src_boxes, target_boxes))
+        loss_giou = 1 - torch.diag(temp[0])
         losses['loss_giou'] = loss_giou.sum() / num_boxes
-        return losses
+
+        iou = torch.diag(temp[1])
+        iiou = iou.sum() / num_boxes  # 总iou除以框数得到平均的iou
+        return losses, iiou
 
     def _get_src_permutation_idx(self, indices):
         batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
@@ -166,11 +170,12 @@ class detr_loss(nn.Module):
             torch.distributed.all_reduce(num_boxes)
         num_boxes = torch.clamp(num_boxes / get_world_size(), min=1).item()
         # 计算主网络损失
+        temp = self.loss_boxes(outputs, targets, indices, num_boxes)
         losses = {}
         losses.update(self.loss_labels(outputs, targets, indices, num_boxes))
-        losses.update(self.loss_boxes(outputs, targets, indices, num_boxes))
+        losses.update(temp[0])
         Loss = losses["loss_ce"] * 1 + losses["loss_bbox"] * 5 + losses["loss_giou"] * 2
-        return Loss
+        return Loss, temp[1]
 
 
 def get_world_size():
@@ -198,7 +203,7 @@ def match(outputs, targets):
 
     cost_class = -out_prob[:, tgt_ids]
     cost_bbox = torch.cdist(out_bbox, tgt_bbox, p=1)
-    cost_giou = - generalized_box_iou(out_bbox, tgt_bbox)
+    cost_giou = - (generalized_box_iou(out_bbox, tgt_bbox)[0])
     C = cost_bbox * cost_bbox + cost_class * cost_class + cost_giou * cost_giou
     C = C.view(bs, num_queries, -1).cpu()  # [batchsize, 预测目标数10, 总目标数]
     sizes = [len(v["box"]) for v in targets]
@@ -214,7 +219,7 @@ def generalized_box_iou(boxes1, boxes2):
     rb = torch.max(boxes1[:, None, 2:], boxes2[:, 2:])
     wh = (rb - lt).clamp(min=0)  # [N,M,2]
     area = wh[:, :, 0] * wh[:, :, 1]
-    return iou - (area - union) / area
+    return [iou - (area - union) / area, iou]  # 这是giou相对于iou的计算公式
 
 
 def box_iou(boxes1, boxes2):
@@ -249,60 +254,64 @@ def box_iou(boxes1, boxes2):
 #     return ac_total / total, total_loss
 
 
-# if __name__ == '__main__':
-#     detr = DETR()
-#     detr = detr.to(device)
-#     criterion = detr_loss()
-#     optimizer = torch.optim.Adam(detr.parameters(), lr=learning_rate)
-#     milestones = [450, 480]
-#     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
-#     st = datetime.datetime.now()
-#     for epoch in range(epochs):
-#         total_loss = 0
-#         count = 0
-#         for i, (features, labels) in enumerate(train_loader):
-#             features = features.to(device)  # 输入直接用原本的二维张量
-#             output = detr(features)
-#             loss = criterion(output, labels)
-#             total_loss += loss
-#             count += 1
-#             loss.backward()
-#             optimizer.step()
-#             optimizer.zero_grad()
-#         et = datetime.datetime.now()
-#         Time = (et - st).seconds
-#         scheduler.step()
-#         print(f"epoch: {epoch + 1}, time:{Time}s, loss: {total_loss / count:.2f}")
-#         # print(f"epoch: {epoch + 1}, time:{Time}s, train_loss: {train_loss:.2f}, "
-#         #       f", train_acc: {train_acc :.2%}")
-#     torch.save(detr.state_dict(), "./128.pth")
+if __name__ == '__main__':
+    detr = DETR()
+    detr = detr.to(device)
+    criterion = detr_loss()
+    optimizer = torch.optim.Adam(detr.parameters(), lr=learning_rate)
+    milestones = [450, 480]
+    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
+    st = datetime.datetime.now()
+    for epoch in range(epochs):
+        total_loss = 0
+        count = 0
+        for i, (features, labels) in enumerate(train_loader):
+            features = features.to(device)  # 输入直接用原本的二维张量
+            output = detr(features)  # torch.Size([128, 10, 21]) torch.Size([128, 10, 4])
+            # label: [{'cls': tensor([14, 14]), 'box': tensor([[....],[....]])}, {...}]
+            # 怎么把某个类别的筛选出来？
+            loss, iou = criterion(output, labels)
+            print("loss:", loss.item())
+            print("iou:", iou.item())
+            total_loss += loss
+            count += 1
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+        et = datetime.datetime.now()
+        Time = (et - st).seconds
+        scheduler.step()
+        print(f"epoch: {epoch + 1}, time:{Time}s, loss: {total_loss / count:.2f}")
+        # print(f"epoch: {epoch + 1}, time:{Time}s, train_loss: {train_loss:.2f}, "
+        #       f", train_acc: {train_acc :.2%}")
+    torch.save(detr.state_dict(), "./new1.pth")
 
 
-# 模型评估
-detr = DETR()
-detr.eval()
-detr = detr.to(device)
-detr.load_state_dict(torch.load("new.pth"))
-for i, (features, labels) in enumerate(val_loader):
-    with torch.no_grad():
-        features = features.to(device)
-        output = detr(features)
-        probas = output['pred_logits'].softmax(-1)  # 类别维度softmax  [batchsize, 10, 20]  [batchsize, 10, 4]
-        keep = probas.max(-1).values > 0.3  # 记录上面类别概率最大值  [batchsize, 10]
-        for i in range(batch_size):
-            Indices = torch.argmax(probas[i, keep[i]], dim=1)
-            c = Indices.tolist()
-            b = output['pred_boxes'][i, keep[i]].tolist()
-            image_data = features[i].cpu()
-            class_names = convert_labels(Indices.tolist(), to_text=True)
-            plt.imshow(image_data.numpy().transpose((1, 2, 0)))
-            for j in range(len(c)):
-                name = class_names[j]
-                if name is not None:
-                    x1, y1, x2, y2 = b[j][0] * 64, b[j][1] * 64, b[j][2] * 64, b[j][3] * 64
-                    bbox = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2,
-                                             edgecolor='r', facecolor='none')  # 创建边界框
-                    plt.gca().add_patch(bbox)
-                    plt.text(x1, y1, name, color='r', fontsize=10)
-            plt.axis('off')
-            plt.show()
+# # 模型评估
+# detr = DETR()
+# detr.eval()
+# detr = detr.to(device)
+# detr.load_state_dict(torch.load("new.pth"))
+# for i, (features, labels) in enumerate(val_loader):
+#     with torch.no_grad():
+#         features = features.to(device)
+#         output = detr(features)
+#         probas = output['pred_logits'].softmax(-1)  # 类别维度softmax  [batchsize, 10, 21]  [batchsize, 10, 4]
+#         keep = probas.max(-1).values > 0.3  # 记录上面类别概率最大值  [batchsize, 10]
+#         for i in range(batch_size):
+#             Indices = torch.argmax(probas[i, keep[i]], dim=1)
+#             c = Indices.tolist()
+#             b = output['pred_boxes'][i, keep[i]].tolist()
+#             image_data = features[i].cpu()
+#             class_names = convert_labels(Indices.tolist(), to_text=True)
+#             plt.imshow(image_data.numpy().transpose((1, 2, 0)))
+#             for j in range(len(c)):
+#                 name = class_names[j]
+#                 if name is not None:
+#                     x1, y1, x2, y2 = b[j][0] * 64, b[j][1] * 64, b[j][2] * 64, b[j][3] * 64
+#                     bbox = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2,
+#                                              edgecolor='r', facecolor='none')  # 创建边界框
+#                     plt.gca().add_patch(bbox)
+#                     plt.text(x1, y1, name, color='r', fontsize=10)
+#             plt.axis('off')
+#             plt.show()
