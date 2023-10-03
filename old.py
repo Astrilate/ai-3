@@ -102,63 +102,73 @@
 #         return self.linear_head(x), self.linear_boundbox(x).sigmoid()
 
 
-
-
-import numpy as np
 import torch
+import numpy as np
 
+# 假设你有以下两个输出张量
+class_scores = torch.rand(3, 10, 21)  # 类别分数张量
+bbox_coordinates = torch.rand(3, 10, 4)  # 目标框坐标张量
 
-
-
-class_scores = torch.rand(128, 10, 21)
-bbox_coordinates = torch.rand(128, 10, 4)
-
-confidence_threshold = 0.0  # 置信度阈值
+confidence_threshold = 0.05  # 置信度阈值
 
 # 对类别分数进行softmax，转换为概率分布
 class_probs = torch.softmax(class_scores, dim=2)
 
-
+# 初始化一个字典来保存每个类别的预测结果
 class_predictions = {}
+
+# 假设你有一个包含每个目标框所属图像索引的张量
+image_indices = torch.arange(3).view(-1, 1).expand(3, 10)
 
 # 遍历每个类别
 for class_idx in range(21):
     # 选择置信度高于阈值的目标框
     mask = class_probs[:, :, class_idx] > confidence_threshold
 
-    # 提取符合条件的目标框坐标和置信度
+    # 提取符合条件的目标框坐标、置信度和对应的图像索引
     filtered_coordinates = bbox_coordinates[mask]
     filtered_confidences = class_probs[:, :, class_idx][mask]
+    filtered_image_indices = image_indices[mask]
 
     # 对目标框按置信度进行排序
     sorted_indices = torch.argsort(filtered_confidences, descending=True)
     sorted_coordinates = filtered_coordinates[sorted_indices]
+    sorted_image_indices = filtered_image_indices[sorted_indices]
 
-    # 将排序后的目标框坐标和置信度保存到字典中
+    # 将排序后的目标框坐标、置信度和图像索引保存到字典中
     class_predictions[class_idx] = {
         'coordinates': sorted_coordinates,
-        'confidences': filtered_confidences[sorted_indices]
+        'confidences': filtered_confidences[sorted_indices],
+        'image_indices': sorted_image_indices
     }
-print(class_predictions)
 
 
+confidence = class_predictions[0]['confidences'].numpy()
+BB = class_predictions[0]['coordinates'].numpy()
+image_ids = class_predictions[0]['image_indices'].numpy()
 
 
-
-
-
-confidence = np.array([0.9, 0.8, 0.7, 0.6])  # 置信度分数
-BB = np.array([[10, 10, 50, 50], [20, 20, 60, 60], [15, 15, 45, 45], [30, 30, 70, 70]])  # 预测框坐标
-image_ids = ['image1', 'image2', 'image1', 'image3']  # 图像ID
+# confidence = np.array([0.9, 0.8, 0.7, 0.6])  # 置信度分数
+# BB = np.array([[10, 10, 50, 50], [20, 20, 60, 60], [15, 15, 45, 45], [30, 30, 70, 70]])  # 预测框坐标
+# image_ids = [1, 2, 1, 3]  # 图像ID
 
 # 示例class_recs字典，包含每个图像的信息
+
+
+
+
+# 先搞定这个
 class_recs = {
-    'image1': {'bbox': np.array([[10, 10, 50, 50], [15, 15, 45, 45]]),  'det': np.array([False, False])},
-    'image2': {'bbox': np.array([[20, 20, 60, 60]]),  'det': np.array([False])},
-    'image3': {'bbox': np.array([[40, 40, 80, 80]]),  'det': np.array([False])}
+    0: {'bbox': np.array([[10, 10, 50, 50], [15, 15, 45, 45]]),  'det': np.array([False, False])},
+    1: {'bbox': np.array([[20, 20, 60, 60]]),  'det': np.array([False])},
+    2: {'bbox': np.array([[40, 40, 80, 80]]),  'det': np.array([False])}
 }
-ovthresh = 0.5
-npos = 4
+
+
+
+
+ovthresh = 0.01  # 交并比阈值，判断是否检测到了
+npos = 4  # 所有的正样本总数
 
 
 
@@ -225,5 +235,5 @@ def voc_ap(rec, prec):
     return ap
 
 
-print(prec, rec)
+print(prec, rec)  # 列表中有（符合置信度阈值的所有目标框）个元素
 print(voc_ap(rec, prec))
