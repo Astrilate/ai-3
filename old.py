@@ -106,8 +106,8 @@ import torch
 import numpy as np
 
 # 假设你有以下两个输出张量
-class_scores = torch.rand(3, 10, 21)  # 类别分数张量
-bbox_coordinates = torch.rand(3, 10, 4)  # 目标框坐标张量
+class_scores = torch.rand(4, 10, 21)  # 类别分数张量
+bbox_coordinates = torch.rand(4, 10, 4)  # 目标框坐标张量
 
 confidence_threshold = 0.05  # 置信度阈值
 
@@ -118,7 +118,7 @@ class_probs = torch.softmax(class_scores, dim=2)
 class_predictions = {}
 
 # 假设你有一个包含每个目标框所属图像索引的张量
-image_indices = torch.arange(3).view(-1, 1).expand(3, 10)
+image_indices = torch.arange(4).view(-1, 1).expand(4, 10)
 
 # 遍历每个类别
 for class_idx in range(21):
@@ -157,12 +157,15 @@ image_ids = class_predictions[0]['image_indices'].numpy()
 
 
 
-# 先搞定这个
+
+# label: [{'cls': tensor([14, 14]), 'box': tensor([[....],[....]])}, {...}]
 class_recs = {
     0: {'bbox': np.array([[10, 10, 50, 50], [15, 15, 45, 45]]),  'det': np.array([False, False])},
     1: {'bbox': np.array([[20, 20, 60, 60]]),  'det': np.array([False])},
-    2: {'bbox': np.array([[40, 40, 80, 80]]),  'det': np.array([False])}
+    2: {'bbox': np.array([[40, 40, 80, 80]]),  'det': np.array([False])},
+    3: {'bbox': np.array([]), 'det': np.array([])}
 }
+
 
 
 
@@ -237,3 +240,43 @@ def voc_ap(rec, prec):
 
 print(prec, rec)  # 列表中有（符合置信度阈值的所有目标框）个元素
 print(voc_ap(rec, prec))
+
+
+
+
+
+
+
+def transform_labels(original_labels, num_classes):
+    transformed_labels = [{} for _ in range(num_classes)]
+
+    for image_idx, image_labels in enumerate(original_labels):
+        for class_idx, class_id in enumerate(image_labels['cls']):
+            class_id = class_id.item()
+            bbox = image_labels['box'][class_idx].numpy()
+
+            if image_idx not in transformed_labels[class_id]:
+                transformed_labels[class_id][image_idx] = {'bbox': [], 'det': []}
+
+            transformed_labels[class_id][image_idx]['bbox'].append(bbox)
+            transformed_labels[class_id][image_idx]['det'].append(False)
+
+    for class_dict in transformed_labels:
+        for idx in range(len(original_labels)):
+            if idx not in class_dict:
+                class_dict[idx] = {'bbox': np.array([[]]), 'det': np.array([])}
+            else:
+                class_dict[idx]['bbox'] = np.array(class_dict[idx]['bbox'])
+                class_dict[idx]['det'] = np.array(class_dict[idx]['det'])
+
+    return transformed_labels
+
+
+num_classes = 4
+
+original_labels = [{'cls': torch.tensor([0, 1, 2]), 'box': torch.tensor([[10, 10, 50, 50], [15, 15, 45, 45], [20, 20, 60, 60]])},
+                   {'cls': torch.tensor([3, 2, 2]), 'box': torch.tensor([[10, 10, 50, 50], [15, 15, 45, 45], [20, 20, 60, 60]])}]
+transformed_labels = transform_labels(original_labels, num_classes)
+
+print(transformed_labels[0])
+

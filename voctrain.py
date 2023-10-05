@@ -20,7 +20,7 @@ PASCAL_VOC_2012_PATH = "D:\\Users\\asus\\Desktop"
 
 batch_size = 128
 learning_rate = 0.0001
-epochs = 600
+epochs = 300
 
 train_transforms = torchvision.transforms.Compose([
     torchvision.transforms.Resize((64, 64)),
@@ -234,84 +234,204 @@ def box_iou(boxes1, boxes2):
     return iou, union
 
 
-# def accuracy(loader):
-#     ac_total = 0
-#     total = 0
-#     for i, (features, labels, locations) in enumerate(loader):
-#         with torch.no_grad():
-#             if i > 10:
-#                 break
-#             features = features.to(device)
-#             labels = labels.to(device)
-#             locations = locations.to(device)
-#             predict, location = detr(features)
-#             Indices = torch.argmax(predict, dim=1)
-#             ac_total += torch.eq(Indices, labels).sum().item()
-#             total += len(labels)
-#             ls = lossF(predict, labels)
-#             ls_box = lossF_box(location, locations.to(torch.float32))
-#             total_loss = ls + ls_box * 50
-#     return ac_total / total, total_loss
+def transform_labels(original_labels, num_classes):
+    transformed_labels = [{} for _ in range(num_classes)]
+
+    for image_idx, image_labels in enumerate(original_labels):
+        for class_idx, class_id in enumerate(image_labels['cls']):
+            class_id = class_id.item()
+            bbox = image_labels['box'][class_idx].numpy()
+
+            if image_idx not in transformed_labels[class_id]:
+                transformed_labels[class_id][image_idx] = {'bbox': [], 'det': []}
+
+            transformed_labels[class_id][image_idx]['bbox'].append(bbox)
+            transformed_labels[class_id][image_idx]['det'].append(False)
+
+    for class_dict in transformed_labels:
+        for idx in range(len(original_labels)):
+            if idx not in class_dict:
+                class_dict[idx] = {'bbox': np.array([[]]), 'det': np.array([])}
+            else:
+                class_dict[idx]['bbox'] = np.array(class_dict[idx]['bbox'])
+                class_dict[idx]['det'] = np.array(class_dict[idx]['det'])
+
+    return transformed_labels
 
 
-if __name__ == '__main__':
-    detr = DETR()
-    detr = detr.to(device)
-    criterion = detr_loss()
-    optimizer = torch.optim.Adam(detr.parameters(), lr=learning_rate)
-    milestones = [450, 480]
-    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
-    st = datetime.datetime.now()
-    for epoch in range(epochs):
-        total_loss = 0
-        count = 0
-        for i, (features, labels) in enumerate(train_loader):
-            features = features.to(device)  # 输入直接用原本的二维张量
-            output = detr(features)  # torch.Size([128, 10, 21]) torch.Size([128, 10, 4])
-            # label: [{'cls': tensor([14, 14]), 'box': tensor([[....],[....]])}, {...}]
-            # 怎么把某个类别的筛选出来？
-            loss, iou = criterion(output, labels)
-            print("loss:", loss.item())
-            print("iou:", iou.item())
-            total_loss += loss
-            count += 1
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-        et = datetime.datetime.now()
-        Time = (et - st).seconds
-        scheduler.step()
-        print(f"epoch: {epoch + 1}, time:{Time}s, loss: {total_loss / count:.2f}")
-        # print(f"epoch: {epoch + 1}, time:{Time}s, train_loss: {train_loss:.2f}, "
-        #       f", train_acc: {train_acc :.2%}")
-    torch.save(detr.state_dict(), "./new1.pth")
+def voc_ap(rec, prec):
+    # correct AP calculation
+    # first append sentinel values at the end
+    mrec = np.concatenate(([0.], rec, [1.]))
+    mpre = np.concatenate(([0.], prec, [0.]))
+
+    # compute the precision 曲线值（也用了插值）
+    for i in range(mpre.size - 1, 0, -1):
+        mpre[i - 1] = np.maximum(mpre[i - 1], mpre[i])
+
+    # to calculate area under PR curve, look for points
+    # where X axis (recall) changes value
+    i = np.where(mrec[1:] != mrec[:-1])[0]
+
+    # and sum (\Delta recall) * prec
+    ap = np.sum((mrec[i + 1] - mrec[i]) * mpre[i + 1])
+    return ap
 
 
-# # 模型评估
-# detr = DETR()
-# detr.eval()
-# detr = detr.to(device)
-# detr.load_state_dict(torch.load("new.pth"))
-# for i, (features, labels) in enumerate(val_loader):
-#     with torch.no_grad():
-#         features = features.to(device)
-#         output = detr(features)
-#         probas = output['pred_logits'].softmax(-1)  # 类别维度softmax  [batchsize, 10, 21]  [batchsize, 10, 4]
-#         keep = probas.max(-1).values > 0.3  # 记录上面类别概率最大值  [batchsize, 10]
-#         for i in range(batch_size):
-#             Indices = torch.argmax(probas[i, keep[i]], dim=1)
-#             c = Indices.tolist()
-#             b = output['pred_boxes'][i, keep[i]].tolist()
-#             image_data = features[i].cpu()
-#             class_names = convert_labels(Indices.tolist(), to_text=True)
-#             plt.imshow(image_data.numpy().transpose((1, 2, 0)))
-#             for j in range(len(c)):
-#                 name = class_names[j]
-#                 if name is not None:
-#                     x1, y1, x2, y2 = b[j][0] * 64, b[j][1] * 64, b[j][2] * 64, b[j][3] * 64
-#                     bbox = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2,
-#                                              edgecolor='r', facecolor='none')  # 创建边界框
-#                     plt.gca().add_patch(bbox)
-#                     plt.text(x1, y1, name, color='r', fontsize=10)
-#             plt.axis('off')
-#             plt.show()
+# if __name__ == '__main__':
+#     detr = DETR()
+#     detr = detr.to(device)
+#     criterion = detr_loss()
+#     optimizer = torch.optim.Adam(detr.parameters(), lr=learning_rate)
+#     milestones = [450, 480]
+#     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
+#     st = datetime.datetime.now()
+#     for epoch in range(epochs):
+#         total_loss = 0
+#         count = 0
+#         for i, (features, labels) in enumerate(train_loader):
+#             features = features.to(device)  # 输入直接用原本的二维张量
+#             output = detr(features)  # torch.Size([128, 10, 21]) torch.Size([128, 10, 4])
+#             # label: [{'cls': tensor([14, 14]), 'box': tensor([[....],[....]])}, {...}]
+#
+#             num_classes = 20
+#             transformed_labels = transform_labels(labels, num_classes)
+#             print(transformed_labels[0])
+#
+#             loss, iou = criterion(output, labels)
+#             print("loss:", loss.item())
+#             print("iou:", iou.item())
+#             total_loss += loss
+#             count += 1
+#             loss.backward()
+#             optimizer.step()
+#             optimizer.zero_grad()
+#         et = datetime.datetime.now()
+#         Time = (et - st).seconds
+#         scheduler.step()
+#         print(f"epoch: {epoch + 1}, time:{Time}s, loss: {total_loss / count:.2f}")
+#         # print(f"epoch: {epoch + 1}, time:{Time}s, train_loss: {train_loss:.2f}, "
+#         #       f", train_acc: {train_acc :.2%}")
+#     torch.save(detr.state_dict(), "./new1.pth")
+
+
+# 模型评估
+detr = DETR()
+detr.eval()
+detr = detr.to(device)
+detr.load_state_dict(torch.load("new.pth"))
+for i, (features, labels) in enumerate(train_loader):
+    with torch.no_grad():
+        features = features.to(device)
+        output = detr(features)
+
+        # 重新格式化标签
+        transformed_labels = transform_labels(labels, 20)
+        # print(transformed_labels[14])
+
+        # 筛选并格式化预测结果
+        class_scores = output['pred_logits'].to("cpu")
+        bbox_coordinates = output['pred_boxes'].to("cpu")
+        confidence_threshold = 0.3  # 置信度阈值
+        class_probs = torch.softmax(class_scores, dim=2)  # 对类别分数进行softmax，转换为概率分布
+        class_predictions = {}
+        image_indices = torch.arange(128).view(-1, 1).expand(128, 10)  # 假设你有一个包含每个目标框所属图像索引的张量
+        for class_idx in range(20):
+            mask = class_probs[:, :, class_idx] > confidence_threshold  # 选择置信度高于阈值的目标框
+            # 提取符合条件的目标框坐标、置信度和对应的图像索引
+            filtered_coordinates = bbox_coordinates[mask]
+            filtered_confidences = class_probs[:, :, class_idx][mask]
+            filtered_image_indices = image_indices[mask]
+            # 对目标框按置信度进行排序
+            sorted_indices = torch.argsort(filtered_confidences, descending=True)
+            sorted_coordinates = filtered_coordinates[sorted_indices]
+            sorted_image_indices = filtered_image_indices[sorted_indices]
+            # 将排序后的目标框坐标、置信度和图像索引保存到字典中
+            class_predictions[class_idx] = {
+                'coordinates': sorted_coordinates,
+                'confidences': filtered_confidences[sorted_indices],
+                'image_indices': sorted_image_indices
+            }
+        total_ap = 0
+        for classs in range(20):
+            confidence = class_predictions[classs]['confidences'].numpy()
+            BB = class_predictions[classs]['coordinates'].numpy()
+            image_ids = class_predictions[classs]['image_indices'].numpy()
+            # print(confidence)
+            # print(BB)
+            # print(image_ids)
+
+            class_recs = transformed_labels[classs]
+            ovthresh = 0.5  # 交并比阈值，判断是否检测到了
+            npos = 0  # 所有的正样本总数
+            for class_id, class_info in class_recs.items():
+                bbox_list = class_info['bbox']
+                npos += len(bbox_list)
+            print(npos)
+
+            # 按照置信度降序排序
+            sorted_ind = np.argsort(-confidence)
+            BB = BB[sorted_ind, :]  # 预测框坐标
+            image_ids = [image_ids[x] for x in sorted_ind]  # 各个预测框的对应图片id# 便利预测框，并统计TPs和FPs
+            nd = len(image_ids)
+            tp = np.zeros(nd)
+            fp = np.zeros(nd)
+            for d in range(nd):
+                R = class_recs[image_ids[d]]
+                bb = BB[d, :].astype(float)
+                ovmax = -np.inf
+                BBGT = R['bbox'].astype(float)  # ground truth
+
+                if BBGT.size > 0:
+                    # 计算IoU
+                    # intersection
+                    ixmin = np.maximum(BBGT[:, 0], bb[0])
+                    iymin = np.maximum(BBGT[:, 1], bb[1])
+                    ixmax = np.minimum(BBGT[:, 2], bb[2])
+                    iymax = np.minimum(BBGT[:, 3], bb[3])
+                    iw = np.maximum(ixmax - ixmin + 1., 0.)
+                    ih = np.maximum(iymax - iymin + 1., 0.)
+                    inters = iw * ih  # union
+                    uni = ((bb[2] - bb[0] + 1.) * (bb[3] - bb[1] + 1.) +
+                           (BBGT[:, 2] - BBGT[:, 0] + 1.) *
+                           (BBGT[:, 3] - BBGT[:, 1] + 1.) - inters)
+
+                    overlaps = inters / uni
+                    ovmax = np.max(overlaps)
+                    jmax = np.argmax(overlaps)  # 取最大的IoU
+
+                if ovmax > ovthresh:  # 是否大于阈值
+                    if not R['det'][jmax]:  # 未被检测
+                        tp[d] = 1.
+                        R['det'][jmax] = 1  # 标记已被检测
+                    else:
+                        fp[d] = 1.
+                else:
+                    fp[d] = 1.  # 计算precision recallfp = np.cumsum(fp)
+            tp = np.cumsum(tp)
+            rec = tp / float(npos)  # avoid divide by zero in case the first detection matches a difficult# ground truth
+            prec = tp / np.maximum(tp + fp, np.finfo(np.float64).eps)
+            print(voc_ap(rec, prec))
+            total_ap += voc_ap(rec, prec)
+        print("map: ", total_ap / 20)
+
+        # # 画图用
+        # probas = output['pred_logits'].softmax(-1)  # 类别维度softmax  [batchsize, 10, 21]  [batchsize, 10, 4]
+        # keep = probas.max(-1).values > 0.5  # 记录上面类别概率最大值  [batchsize, 10]
+        # for i in range(batch_size):
+        #     Indices = torch.argmax(probas[i, keep[i]], dim=1)
+        #     c = Indices.tolist()
+        #     b = output['pred_boxes'][i, keep[i]].tolist()
+        #     image_data = features[i].cpu()
+        #     class_names = convert_labels(Indices.tolist(), to_text=True)
+        #     plt.imshow(image_data.numpy().transpose((1, 2, 0)))
+        #     for j in range(len(c)):
+        #         name = class_names[j]
+        #         if name is not None:
+        #             x1, y1, x2, y2 = b[j][0] * 64, b[j][1] * 64, b[j][2] * 64, b[j][3] * 64
+        #             bbox = patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=2,
+        #                                      edgecolor='r', facecolor='none')  # 创建边界框
+        #             plt.gca().add_patch(bbox)
+        #             plt.text(x1, y1, name, color='r', fontsize=10)
+        #     plt.axis('off')
+        #     plt.show()
