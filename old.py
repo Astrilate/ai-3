@@ -102,217 +102,232 @@
 #         return self.linear_head(x), self.linear_boundbox(x).sigmoid()
 
 
-import torch
-import numpy as np
+# import torch
+# import numpy as np
+#
+# # 假设你有以下两个输出张量
+# class_scores = torch.rand(4, 10, 21)  # 类别分数张量
+# bbox_coordinates = torch.rand(4, 10, 4)  # 目标框坐标张量
+#
+# confidence_threshold = 0.05  # 置信度阈值
+#
+# # 对类别分数进行softmax，转换为概率分布
+# class_probs = torch.softmax(class_scores, dim=2)
+#
+# # 初始化一个字典来保存每个类别的预测结果
+# class_predictions = {}
+#
+# # 假设你有一个包含每个目标框所属图像索引的张量
+# image_indices = torch.arange(4).view(-1, 1).expand(4, 10)
+#
+# # 遍历每个类别
+# for class_idx in range(21):
+#     # 选择置信度高于阈值的目标框
+#     mask = class_probs[:, :, class_idx] > confidence_threshold
+#
+#     # 提取符合条件的目标框坐标、置信度和对应的图像索引
+#     filtered_coordinates = bbox_coordinates[mask]
+#     filtered_confidences = class_probs[:, :, class_idx][mask]
+#     filtered_image_indices = image_indices[mask]
+#
+#     # 对目标框按置信度进行排序
+#     sorted_indices = torch.argsort(filtered_confidences, descending=True)
+#     sorted_coordinates = filtered_coordinates[sorted_indices]
+#     sorted_image_indices = filtered_image_indices[sorted_indices]
+#
+#     # 将排序后的目标框坐标、置信度和图像索引保存到字典中
+#     class_predictions[class_idx] = {
+#         'coordinates': sorted_coordinates,
+#         'confidences': filtered_confidences[sorted_indices],
+#         'image_indices': sorted_image_indices
+#     }
+#
+#
+# confidence = class_predictions[0]['confidences'].numpy()
+# BB = class_predictions[0]['coordinates'].numpy()
+# image_ids = class_predictions[0]['image_indices'].numpy()
+#
+#
+# # confidence = np.array([0.9, 0.8, 0.7, 0.6])  # 置信度分数
+# # BB = np.array([[10, 10, 50, 50], [20, 20, 60, 60], [15, 15, 45, 45], [30, 30, 70, 70]])  # 预测框坐标
+# # image_ids = [1, 2, 1, 3]  # 图像ID
+#
+# # 示例class_recs字典，包含每个图像的信息
+#
+#
+#
+#
+#
+# # label: [{'cls': tensor([14, 14]), 'box': tensor([[....],[....]])}, {...}]
+# class_recs = {
+#     0: {'bbox': np.array([[10, 10, 50, 50], [15, 15, 45, 45]]),  'det': np.array([False, False])},
+#     1: {'bbox': np.array([[20, 20, 60, 60]]),  'det': np.array([False])},
+#     2: {'bbox': np.array([[40, 40, 80, 80]]),  'det': np.array([False])},
+#     3: {'bbox': np.array([]), 'det': np.array([])}
+# }
+#
+#
+#
+#
+#
+# ovthresh = 0.01  # 交并比阈值，判断是否检测到了
+# npos = 4  # 所有的正样本总数
+#
+#
+#
+# # 按照置信度降序排序
+# sorted_ind = np.argsort(-confidence)
+# BB = BB[sorted_ind, :]   # 预测框坐标
+# image_ids = [image_ids[x] for x in sorted_ind] # 各个预测框的对应图片id# 便利预测框，并统计TPs和FPs
+# nd = len(image_ids)
+# tp = np.zeros(nd)
+# fp = np.zeros(nd)
+# for d in range(nd):
+#     R = class_recs[image_ids[d]]
+#     bb = BB[d, :].astype(float)
+#     ovmax = -np.inf
+#     BBGT = R['bbox'].astype(float)  # ground truth
+#
+#     if BBGT.size > 0:
+#         # 计算IoU
+#         # intersection
+#         ixmin = np.maximum(BBGT[:, 0], bb[0])
+#         iymin = np.maximum(BBGT[:, 1], bb[1])
+#         ixmax = np.minimum(BBGT[:, 2], bb[2])
+#         iymax = np.minimum(BBGT[:, 3], bb[3])
+#         iw = np.maximum(ixmax - ixmin + 1., 0.)
+#         ih = np.maximum(iymax - iymin + 1., 0.)
+#         inters = iw * ih        # union
+#         uni = ((bb[2] - bb[0] + 1.) * (bb[3] - bb[1] + 1.) +
+#                (BBGT[:, 2] - BBGT[:, 0] + 1.) *
+#                (BBGT[:, 3] - BBGT[:, 1] + 1.) - inters)
+#
+#         overlaps = inters / uni
+#         ovmax = np.max(overlaps)
+#         jmax = np.argmax(overlaps)    # 取最大的IoU
+#
+#     if ovmax > ovthresh:  # 是否大于阈值
+#         if not R['det'][jmax]:    # 未被检测
+#             tp[d] = 1.
+#             R['det'][jmax] = 1    # 标记已被检测
+#         else:
+#             fp[d] = 1.
+#     else:
+#         fp[d] = 1.  # 计算precision recallfp = np.cumsum(fp)
+# tp = np.cumsum(tp)
+# rec = tp / float(npos)  # avoid divide by zero in case the first detection matches a difficult# ground truth
+# prec = tp / np.maximum(tp + fp, np.finfo(np.float64).eps)
+#
+#
+# def voc_ap(rec, prec):
+#     # correct AP calculation
+#     # first append sentinel values at the end
+#     mrec = np.concatenate(([0.], rec, [1.]))
+#     mpre = np.concatenate(([0.], prec, [0.]))
+#
+#     # compute the precision 曲线值（也用了插值）
+#     for i in range(mpre.size - 1, 0, -1):
+#         mpre[i - 1] = np.maximum(mpre[i - 1], mpre[i])
+#
+#     # to calculate area under PR curve, look for points
+#     # where X axis (recall) changes value
+#     i = np.where(mrec[1:] != mrec[:-1])[0]
+#
+#     # and sum (\Delta recall) * prec
+#     ap = np.sum((mrec[i + 1] - mrec[i]) * mpre[i + 1])
+#     return ap
+#
+#
+# print(prec, rec)  # 列表中有（符合置信度阈值的所有目标框）个元素
+# print(voc_ap(rec, prec))
+#
+#
+#
+#
+#
+#
+#
+# def transform_labels(original_labels, num_classes):
+#     transformed_labels = [{} for _ in range(num_classes)]
+#
+#     for image_idx, image_labels in enumerate(original_labels):
+#         for class_idx, class_id in enumerate(image_labels['cls']):
+#             class_id = class_id.item()
+#             bbox = image_labels['box'][class_idx].numpy()
+#
+#             if image_idx not in transformed_labels[class_id]:
+#                 transformed_labels[class_id][image_idx] = {'bbox': [], 'det': []}
+#
+#             transformed_labels[class_id][image_idx]['bbox'].append(bbox)
+#             transformed_labels[class_id][image_idx]['det'].append(False)
+#
+#     for class_dict in transformed_labels:
+#         for idx in range(len(original_labels)):
+#             if idx not in class_dict:
+#                 class_dict[idx] = {'bbox': np.array([[]]), 'det': np.array([])}
+#             else:
+#                 class_dict[idx]['bbox'] = np.array(class_dict[idx]['bbox'])
+#                 class_dict[idx]['det'] = np.array(class_dict[idx]['det'])
+#
+#     return transformed_labels
+#
+#
+# num_classes = 4
+#
+# original_labels = [{'cls': torch.tensor([0, 1, 2]), 'box': torch.tensor([[10, 10, 50, 50], [15, 15, 45, 45], [20, 20, 60, 60]])},
+#                    {'cls': torch.tensor([3, 2, 2]), 'box': torch.tensor([[10, 10, 50, 50], [15, 15, 45, 45], [20, 20, 60, 60]])}]
+# transformed_labels = transform_labels(original_labels, num_classes)
+#
+# print(transformed_labels[0])
+#
+#
+#
+#
+#
+#
+#
+#
+# class DETR(nn.Module):
+#     def __init__(self, backbone, transformer, num_classes, num_queries, aux_loss=False):
+#
+#         super().__init__()
+#         self.num_queries = num_queries
+#         self.transformer = transformer
+#         hidden_dim = transformer.d_model
+#         self.class_embed = nn.Linear(hidden_dim, num_classes + 1)
+#         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
+#         self.query_embed = nn.Embedding(num_queries, hidden_dim)
+#         self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
+#         self.backbone = backbone
+#         self.aux_loss = aux_loss
+#
+#     def forward(self, samples: NestedTensor):
+#         if isinstance(samples, (list, torch.Tensor)):
+#             samples = nested_tensor_from_tensor_list(samples)
+#         features, pos = self.backbone(samples)
+#
+#         src, mask = features[-1].decompose()
+#         assert mask is not None
+#         hs = self.transformer(self.input_proj(src), mask, self.query_embed.weight, pos[-1])[0]
+#
+#         outputs_class = self.class_embed(hs)
+#         outputs_coord = self.bbox_embed(hs).sigmoid()
+#         out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
+#         if self.aux_loss:
+#             out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord)
+#         return out
+
+
+
+import matplotlib.pyplot as plt
+
+# 示例数据，你需要替换成实际的数据
+epochs = 10
+train_losses_list = [0.5, 0.4, 0.3, 0.2, 0.1, 0.2, 0.3, 0.4, 0.3, 0.2]
+test_losses_list = [0.6, 0.5, 0.4, 0.3, 0.2, 0.3, 0.4, 0.5, 0.4, 0.3]
+train_accuracy_list = [85, 88, 90, 92, 94, 92, 90, 88, 85, 82]
+test_accuracy_list = [80, 82, 85, 88, 90, 88, 85, 82, 80, 78]
+train_iou_list = [0.7, 0.72, 0.75, 0.78, 0.8, 0.78, 0.75, 0.72, 0.7, 0.68]
+test_iou_list = [0.65, 0.68, 0.72, 0.75, 0.78, 0.75, 0.72, 0.68, 0.65, 0.62]
 
-# 假设你有以下两个输出张量
-class_scores = torch.rand(4, 10, 21)  # 类别分数张量
-bbox_coordinates = torch.rand(4, 10, 4)  # 目标框坐标张量
 
-confidence_threshold = 0.05  # 置信度阈值
-
-# 对类别分数进行softmax，转换为概率分布
-class_probs = torch.softmax(class_scores, dim=2)
-
-# 初始化一个字典来保存每个类别的预测结果
-class_predictions = {}
-
-# 假设你有一个包含每个目标框所属图像索引的张量
-image_indices = torch.arange(4).view(-1, 1).expand(4, 10)
-
-# 遍历每个类别
-for class_idx in range(21):
-    # 选择置信度高于阈值的目标框
-    mask = class_probs[:, :, class_idx] > confidence_threshold
-
-    # 提取符合条件的目标框坐标、置信度和对应的图像索引
-    filtered_coordinates = bbox_coordinates[mask]
-    filtered_confidences = class_probs[:, :, class_idx][mask]
-    filtered_image_indices = image_indices[mask]
-
-    # 对目标框按置信度进行排序
-    sorted_indices = torch.argsort(filtered_confidences, descending=True)
-    sorted_coordinates = filtered_coordinates[sorted_indices]
-    sorted_image_indices = filtered_image_indices[sorted_indices]
-
-    # 将排序后的目标框坐标、置信度和图像索引保存到字典中
-    class_predictions[class_idx] = {
-        'coordinates': sorted_coordinates,
-        'confidences': filtered_confidences[sorted_indices],
-        'image_indices': sorted_image_indices
-    }
-
-
-confidence = class_predictions[0]['confidences'].numpy()
-BB = class_predictions[0]['coordinates'].numpy()
-image_ids = class_predictions[0]['image_indices'].numpy()
-
-
-# confidence = np.array([0.9, 0.8, 0.7, 0.6])  # 置信度分数
-# BB = np.array([[10, 10, 50, 50], [20, 20, 60, 60], [15, 15, 45, 45], [30, 30, 70, 70]])  # 预测框坐标
-# image_ids = [1, 2, 1, 3]  # 图像ID
-
-# 示例class_recs字典，包含每个图像的信息
-
-
-
-
-
-# label: [{'cls': tensor([14, 14]), 'box': tensor([[....],[....]])}, {...}]
-class_recs = {
-    0: {'bbox': np.array([[10, 10, 50, 50], [15, 15, 45, 45]]),  'det': np.array([False, False])},
-    1: {'bbox': np.array([[20, 20, 60, 60]]),  'det': np.array([False])},
-    2: {'bbox': np.array([[40, 40, 80, 80]]),  'det': np.array([False])},
-    3: {'bbox': np.array([]), 'det': np.array([])}
-}
-
-
-
-
-
-ovthresh = 0.01  # 交并比阈值，判断是否检测到了
-npos = 4  # 所有的正样本总数
-
-
-
-# 按照置信度降序排序
-sorted_ind = np.argsort(-confidence)
-BB = BB[sorted_ind, :]   # 预测框坐标
-image_ids = [image_ids[x] for x in sorted_ind] # 各个预测框的对应图片id# 便利预测框，并统计TPs和FPs
-nd = len(image_ids)
-tp = np.zeros(nd)
-fp = np.zeros(nd)
-for d in range(nd):
-    R = class_recs[image_ids[d]]
-    bb = BB[d, :].astype(float)
-    ovmax = -np.inf
-    BBGT = R['bbox'].astype(float)  # ground truth
-
-    if BBGT.size > 0:
-        # 计算IoU
-        # intersection
-        ixmin = np.maximum(BBGT[:, 0], bb[0])
-        iymin = np.maximum(BBGT[:, 1], bb[1])
-        ixmax = np.minimum(BBGT[:, 2], bb[2])
-        iymax = np.minimum(BBGT[:, 3], bb[3])
-        iw = np.maximum(ixmax - ixmin + 1., 0.)
-        ih = np.maximum(iymax - iymin + 1., 0.)
-        inters = iw * ih        # union
-        uni = ((bb[2] - bb[0] + 1.) * (bb[3] - bb[1] + 1.) +
-               (BBGT[:, 2] - BBGT[:, 0] + 1.) *
-               (BBGT[:, 3] - BBGT[:, 1] + 1.) - inters)
-
-        overlaps = inters / uni
-        ovmax = np.max(overlaps)
-        jmax = np.argmax(overlaps)    # 取最大的IoU
-
-    if ovmax > ovthresh:  # 是否大于阈值
-        if not R['det'][jmax]:    # 未被检测
-            tp[d] = 1.
-            R['det'][jmax] = 1    # 标记已被检测
-        else:
-            fp[d] = 1.
-    else:
-        fp[d] = 1.  # 计算precision recallfp = np.cumsum(fp)
-tp = np.cumsum(tp)
-rec = tp / float(npos)  # avoid divide by zero in case the first detection matches a difficult# ground truth
-prec = tp / np.maximum(tp + fp, np.finfo(np.float64).eps)
-
-
-def voc_ap(rec, prec):
-    # correct AP calculation
-    # first append sentinel values at the end
-    mrec = np.concatenate(([0.], rec, [1.]))
-    mpre = np.concatenate(([0.], prec, [0.]))
-
-    # compute the precision 曲线值（也用了插值）
-    for i in range(mpre.size - 1, 0, -1):
-        mpre[i - 1] = np.maximum(mpre[i - 1], mpre[i])
-
-    # to calculate area under PR curve, look for points
-    # where X axis (recall) changes value
-    i = np.where(mrec[1:] != mrec[:-1])[0]
-
-    # and sum (\Delta recall) * prec
-    ap = np.sum((mrec[i + 1] - mrec[i]) * mpre[i + 1])
-    return ap
-
-
-print(prec, rec)  # 列表中有（符合置信度阈值的所有目标框）个元素
-print(voc_ap(rec, prec))
-
-
-
-
-
-
-
-def transform_labels(original_labels, num_classes):
-    transformed_labels = [{} for _ in range(num_classes)]
-
-    for image_idx, image_labels in enumerate(original_labels):
-        for class_idx, class_id in enumerate(image_labels['cls']):
-            class_id = class_id.item()
-            bbox = image_labels['box'][class_idx].numpy()
-
-            if image_idx not in transformed_labels[class_id]:
-                transformed_labels[class_id][image_idx] = {'bbox': [], 'det': []}
-
-            transformed_labels[class_id][image_idx]['bbox'].append(bbox)
-            transformed_labels[class_id][image_idx]['det'].append(False)
-
-    for class_dict in transformed_labels:
-        for idx in range(len(original_labels)):
-            if idx not in class_dict:
-                class_dict[idx] = {'bbox': np.array([[]]), 'det': np.array([])}
-            else:
-                class_dict[idx]['bbox'] = np.array(class_dict[idx]['bbox'])
-                class_dict[idx]['det'] = np.array(class_dict[idx]['det'])
-
-    return transformed_labels
-
-
-num_classes = 4
-
-original_labels = [{'cls': torch.tensor([0, 1, 2]), 'box': torch.tensor([[10, 10, 50, 50], [15, 15, 45, 45], [20, 20, 60, 60]])},
-                   {'cls': torch.tensor([3, 2, 2]), 'box': torch.tensor([[10, 10, 50, 50], [15, 15, 45, 45], [20, 20, 60, 60]])}]
-transformed_labels = transform_labels(original_labels, num_classes)
-
-print(transformed_labels[0])
-
-
-
-
-
-
-
-
-class DETR(nn.Module):
-    def __init__(self, backbone, transformer, num_classes, num_queries, aux_loss=False):
-
-        super().__init__()
-        self.num_queries = num_queries
-        self.transformer = transformer
-        hidden_dim = transformer.d_model
-        self.class_embed = nn.Linear(hidden_dim, num_classes + 1)
-        self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
-        self.query_embed = nn.Embedding(num_queries, hidden_dim)
-        self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
-        self.backbone = backbone
-        self.aux_loss = aux_loss
-
-    def forward(self, samples: NestedTensor):
-        if isinstance(samples, (list, torch.Tensor)):
-            samples = nested_tensor_from_tensor_list(samples)
-        features, pos = self.backbone(samples)
-
-        src, mask = features[-1].decompose()
-        assert mask is not None
-        hs = self.transformer(self.input_proj(src), mask, self.query_embed.weight, pos[-1])[0]
-
-        outputs_class = self.class_embed(hs)
-        outputs_coord = self.bbox_embed(hs).sigmoid()
-        out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
-        if self.aux_loss:
-            out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord)
-        return out
